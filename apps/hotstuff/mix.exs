@@ -3,7 +3,7 @@ defmodule Raft.MixProject do
 
   def project do
     [
-      app: :pbft,
+      app: :hotstuff,
       version: "0.1.0",
       build_path: "../../_build",
       config_path: "../../config/config.exs",
@@ -30,7 +30,8 @@ defmodule Raft.MixProject do
       {:credo, "~> 1.4", only: [:dev, :test], runtime: false},
       {:statistics, "~> 0.6.2"},
       {:cloak, "1.1.1"},
-      {:ex_crypto, "~> 0.10.0"}
+      {:ex_crypto, "~> 0.10.0"},
+      {:logger_file_backend, "~> 0.0.6"}
     ]
   end
 end

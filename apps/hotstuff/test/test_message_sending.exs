@@ -1,4 +1,4 @@
-defmodule BasicTest do
+defmodule TestMessageSending do
     use ExUnit.Case
     doctest PBFT
     import Emulation, only: [spawn: 2, send: 2]
@@ -10,7 +10,7 @@ defmodule BasicTest do
 
     require Logger
 
-    test "Nothing crashes during startup" do
+    test "Sending message works" do
       Emulation.init()
       Emulation.append_fuzzers([Fuzzers.delay(2)])
 
@@ -44,7 +44,7 @@ defmodule BasicTest do
         spawn(:client, fn ->
           client = PBFT.Client.new_client(replicas, pub_keys, Map.get(priv_keys, :client))
           Logger.info(client)
-          PBFT.Client.nop(client)
+          PBFT.Client.send_message(client, "1+1")
   
           receive do
           after
