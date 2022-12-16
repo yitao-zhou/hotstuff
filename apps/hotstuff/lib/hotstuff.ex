@@ -15,7 +15,7 @@ defmodule HotStuff do
   # required by the HotStuff protocol.
   defstruct(
     #The list of current processes
-    replica_table: nil
+    replica_table: nil,
 
     view_id: nil,
     current_leader: nil,
@@ -111,14 +111,15 @@ defmodule HotStuff do
   def become_leader(state) do
     Logger.info("Process #{inspect(whoami())} become leader")
     state = %{state | is_leader: true}
+    leader(state, %{})
   end
 
   @doc """
   This function implements the state machine for a process
   that is currently a primary.
   """
-  @spec leader(%PBFT{is_primary: true}, any()) :: no_return()
-  def primary(state, extra_state) do
+  @spec leader(%HotStuff{is_leader: true}, any()) :: no_return()
+  def leader(state, extra_state) do
     receive do
       {sender, :nop} ->
         send(sender, :ok)
@@ -128,16 +129,16 @@ defmodule HotStuff do
   @doc """
   This function makes a replica as backup
   """
-  @spec become_backup(%PBFT{is_primary: false}) :: no_return()
-  def become_backup(state) do
+  @spec become_replica(%HotStuff{is_leader: false}) :: no_return()
+  def become_replica(state) do
     raise "Not yet implemented"
   end
 
   @doc """
 
   """
-  @spec backup(%PBFT{is_primary: false}, any()) :: no_return()
-  def backup(state, extra_state) do
+  @spec replica(%HotStuff{is_leader: false}, any()) :: no_return()
+  def replica(state, extra_state) do
     receive do
       {sender, :nop} ->
         send(sender, :ok)
@@ -156,15 +157,15 @@ defmodule HotStuff.Client do
   requests to the RSM.
   """
   alias __MODULE__
-  @enforce_keys [:primaryID]
-  defstruct(primaryID: nil)
+  @enforce_keys [:leaderID]
+  defstruct(leaderID: nil)
 
   @doc """
   Construct a new PBFT Client.
   """
-  @spec new_client(atom()) :: %Client{primaryID: atom()}
+  @spec new_client(atom()) :: %Client{leaderID: atom()}
   def new_client(member) do
-    %Client{primaryID: member}
+    %Client{leaderID: member}
   end
 
   @doc """
@@ -172,8 +173,8 @@ defmodule HotStuff.Client do
   """
   @spec nop(%Client{}) :: {:ok, %Client{}}
   def nop(client) do
-    primary = client.primaryID
-    send(primary, :nop)
+    leader = client.leaderID
+    send(leader, :nop)
 
     receive do
       # {_, {:redirect, new_leader}} ->

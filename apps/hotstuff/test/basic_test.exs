@@ -1,6 +1,6 @@
 defmodule BasicTest do
     use ExUnit.Case
-    doctest PBFT
+    doctest HotStuff
     import Emulation, only: [spawn: 2, send: 2]
   
     import Kernel,
@@ -12,17 +12,17 @@ defmodule BasicTest do
 
 
       base_config =
-        PBFT.new_configuration([:a, :b, :c, :d], 0, :a)
+      HotStuff.new_configuration([:a, :b, :c, :d], :a)
   
-      spawn(:a, fn -> PBFT.become_primary(base_config) end)
+      spawn(:a, fn -> HotStuff.become_leader(base_config) end)
     #   spawn(:b, fn -> PBFT.become_backup(base_config) end)
     #   spawn(:c, fn -> PBFT.become_backup(base_config) end)
     #   spawn(:d, fn -> PBFT.become_backup(base_config) end)
   
       client =
         spawn(:client, fn ->
-          client = PBFT.Client.new_client(:a)
-          PBFT.Client.nop(client)
+          client = HotStuff.Client.new_client(:a)
+          HotStuff.Client.nop(client)
   
           receive do
           after
