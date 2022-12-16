@@ -83,28 +83,21 @@ defmodule HotStuff.LogEntry do
   end
 end
 
-
-defmodule PBFT.RequestMessage do
+defmodule HotStuff.Msg do
   @moduledoc """
-  RequestMessage RPC
+  Utility 1 function Msg 
   """
   alias __MODULE__
 
   @enforce_keys [
-    :operation,
-    :timestamp,
-    :client,
-    :signature
+    :type, :viewNumber, :node, :justify
   ]
   defstruct(
-    operation: nil,
-    timestamp: nil,
-    client: nil,
-    signature: nil
+    type: nil, viewNumber: nil, node: nil, justify: nil
   )
 
   @doc """
-  Create a new RequestMessage
+  Create a new Msg
   """
 
   @spec new(
@@ -113,23 +106,104 @@ defmodule PBFT.RequestMessage do
           atom(),
           any()
         ) ::
-          %RequestMessage{
-            operation: any(),
-            timestamp: non_neg_integer(),
-            client: atom(),
-            signature: any()
+          %Msg{
+            type: any(),
+            viewNumber: non_neg_integer(),
+            node: atom(),
+            justify: any()
           }
   def new(
-          operation,
-          timestamp,
-          client,
-          signature
+      type,
+      viewNumber,
+      node,
+      justify
       ) do
-    %RequestMessage{
-      operation: operation,
-      timestamp: timestamp,
-      client: client,
-      signature: signature
+    %Msg{
+      type: type,
+      viewNumber: viewNumber,
+      node: node,
+      justify: justify
     }
   end
 end
+
+defmodule HotStuff.VoteMsg do
+  @moduledoc """
+  Utility 2 function VoteMsg 
+  """
+  alias __MODULE__
+
+  # @enforce_keys [
+    
+  # ]
+  defstruct(
+    message: nil, partialSig: nil
+  )
+
+  @doc """
+  Create a new Msg
+  """
+
+  @spec new(
+          any(),
+          any()
+        ) ::
+          %VoteMsg{
+            message: any(),
+            partialSig: any()
+          }
+  def new(
+      message,
+      partialSig
+      ) do
+    %VoteMsg{
+      message: message,
+      partialSig: partialSig
+    }
+  end
+end
+
+defmodule HotStuff.QC do
+  @moduledoc """
+  quorum certificate
+  """
+  alias __MODULE__
+
+  # @enforce_keys [
+    
+  # ]
+  defstruct(
+    type: nil, viewNumber: nil, node: nil, sig: nil
+  )
+
+  @doc """
+  Create a new Msg
+  """
+
+  @spec new(
+          any(),
+          any(),
+          any(),
+          any()
+        ) ::
+          %QC{
+            type: any(),
+            viewNumber: any(),
+            node: any(),
+            sig: any()
+          }
+  def new(
+      type,
+      viewNumber,
+      node, 
+      sig
+      ) do
+    %QC{
+      type: type,
+      viewNumber: viewNumber,
+      node: node,
+      sig: sig
+    }
+  end
+end
+

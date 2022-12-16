@@ -17,7 +17,7 @@ defmodule HotStuff do
     #The list of current processes
     replica_table: nil,
 
-    view_id: nil,
+    curr_view: nil,
     current_leader: nil,
     is_leader: nil,
 
@@ -47,7 +47,7 @@ defmodule HotStuff do
       ) do
     %HotStuff{
       replica_table: replica_table,
-      view_id: 1,
+      curr_view: 1,
       current_leader: leader,
       is_leader: false,
       log: [],
@@ -103,6 +103,71 @@ defmodule HotStuff do
     end
   end
 
+  @doc """
+  This function is to generate a Msg given state, type, node, qc
+  """
+  @spec generate_msg(any(), any(), any(), any()) :: any()
+  def generate_msg(state, type, node, qc) do
+    HotStuff.Msg.new(type, state.curr_view, node, qc)
+  end
+
+  @doc """
+  This function is to generate a VoteMsg given state, type, node, qc
+  """
+  @spec generate_votemsg(any(), any(), any(), any()) :: any()
+  def generate_votemsg(state, type, node, qc) do
+    msg = generate_msg(state, type, node, qc)
+    # TODO: partial signature, replaced with a number right now instead
+    partialSig = 1
+
+    HotStuff.VoteMsg.new(msg, partialSig)
+  end
+
+  @doc """
+  This function is to create a leaf
+  """
+  @spec createLeaf(any(), any()) :: any()
+  def createLeaf(parent, cmd) do
+    raise "Not Yet Implemented"
+  end
+
+  @doc """
+  This function is to generate QC
+  """
+  @spec qc(any()) :: any()
+  def qc(v) do
+    # TODO: need to consider how to combine sigatures
+
+    # suppose v is implemented with a list of Msg, pick the first out of the V
+    message - Enum.at(v, 0)
+    # sig needs to be changed
+    sig = 1
+    HotStuff.QC.new(message.type, message.viewNumber, message.node, sig)
+  end
+
+  @doc """
+  This function is to check matching msg
+  """
+  @spec matching_Msg(any(), any(), any()) :: boolean()
+  def matching_Msg(message, type, view) do
+    message.type == type and message.viewNumber == view
+  end
+
+  @doc """
+  This function is to check matching qc
+  """
+  @spec matching_qc(any(), any(), any()) :: boolean()
+  def matching_qc(qc, type, view) do
+    qc.type == type and qc.viewNumber == view
+  end
+
+  @doc """
+  This function is to check matching qc
+  """
+  @spec safeNode(any(), any()) :: boolean()
+  def safeNode(node, qc) do
+    raise "Not Yet Implemented"
+  end
 
   @doc """
   This function transitions a process so it is a primary.
