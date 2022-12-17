@@ -25,8 +25,10 @@ defmodule HotStuff do
     #with latter entries (lower node in the tree) closer to the head of the list
     log: nil,
 
-    commit_height: nil,
-    last_applied_height: nil,
+    #The highest qc (index the replica voted commit)
+    locked_qc: nil,
+    #highest qc which a replica voted pre-commit
+    prepare_qc: nil,
 
     #In this simulation the RSM we are building is a queue
     queue: nil
@@ -47,10 +49,7 @@ defmodule HotStuff do
       ) do
     %HotStuff{
       replica_table: replica_table,
-
-=======
       curr_view: 1,
->>>>>>> 7d1fbcd00748013875132861272821c499e96193
       current_leader: leader,
       is_leader: false,
       log: [],
@@ -106,6 +105,35 @@ defmodule HotStuff do
     end
   end
 
+  # Utility function to send a message to all
+  # processes other than the caller. Should only be used by leader.
+  @spec broadcast_to_others(%HotStuff{is_leader: true}, any()) :: [boolean()]
+  defp broadcast_to_others(state, message) do
+    me = whoami()
+
+    state.view
+    |> Enum.filter(fn pid -> pid != me end)
+    |> Enum.map(fn pid -> send(pid, message) end)
+  end
+
+  @doc """
+  Add log entries to the log. This adds entries to the beginning
+  of the log, we assume that entries are already correctly ordered
+  (see structural note about log above.).
+  """
+  @spec add_log_entries(%HotStuff{}, [%HotStuff.LogEntry{}]) :: %HotStuff{}
+  def add_log_entries(state, entries) do
+    %{state | log: entries ++ state.log}
+  end
+
+  @doc """
+  Get index for the last log entry.
+  """
+  @spec get_last_log_height(%HotStuff{}) :: non_neg_integer()
+  def get_last_log_height(state) do
+    Enum.at(state.log, 0, HotStuff.LogEntry.empty()).height
+  end
+
   @doc """
   This function is to generate a Msg given state, type, node, qc
   """
@@ -131,7 +159,7 @@ defmodule HotStuff do
   """
   @spec createLeaf(any(), any()) :: any()
   def createLeaf(parent, cmd) do
-    raise "Not Yet Implemented"
+
   end
 
   @doc """
@@ -151,9 +179,9 @@ defmodule HotStuff do
   @doc """
   This function is to check matching msg
   """
-  @spec matching_Msg(any(), any(), any()) :: boolean()
-  def matching_Msg(message, type, view) do
-    message.type == type and message.viewNumber == view
+  @spec matching_Msg(any(), any(), any(), any()) :: boolean()
+  def matching_Msg(message_type, message_view, type, view) do
+    message_type == type and message_view == view
   end
 
   @doc """
@@ -179,7 +207,7 @@ defmodule HotStuff do
   def become_leader(state) do
     Logger.info("Process #{inspect(whoami())} become leader")
     state = %{state | is_leader: true}
-    leader(state, %{})
+    leader(state, %{msg_type: :new_view, count: 0})
   end
 
   @doc """
@@ -187,10 +215,67 @@ defmodule HotStuff do
   that is currently a primary.
   """
   @spec leader(%HotStuff{is_leader: true}, any()) :: no_return()
+  #Use the `extra_state` to track the phase leader is in
+  #and the number of different type of qc it have received in given phase
   def leader(state, extra_state) do
     receive do
-      {sender, :nop} ->
-        send(sender, :ok)
+      {sender,
+      %HotStuff.Msg{
+        type: type
+        view_number: view_number,
+        node: log_entry,
+        justify: qc
+      }} ->
+        high_qc = state.prepared_qc
+        #Tracking the number of :new_view message received and the highest_qc received
+        if (matching_Msg(type, view_number, extra_state.type, state.curr_view)) do
+          receive_cnt = extra_state.count + 1
+          if qc.view_number > high_qc.view_number do
+            high_qc = qc
+          end
+          #Wait for (n-f-1) new view message -> including leader itself there are (n-f) messages
+          if receive_cnt > Integer.floor_div(length(state.replica_table), 3) * 2 do
+            node_proposal = createLeaf()
+            #create the prepare message and broadcast to all the follwers
+            prepare_msg = generate_msg(state, :prepare, node_proposal, high_qc)
+            broadcast_to_others(state, prepare_msg)
+            extra_state = %{extra_state | type: :prepare, count: 0}
+          end
+          extra_state = %{extra_state | count: receive_cnt}
+        end
+        leader(state, extra_state)
+
+        {sender,
+        %HotStuff.VoteMsg{
+          message: message,
+          partial_sig: partial_sig
+        }} ->
+          if (matching_Msg(message.type, message.view_number, extra_state.type, state.curr_view)) do
+            receive_cnt = extra_state.count + 1
+            #Wait for (n-f) votes
+            if receive_cnt > Integer.floor_div(length(state.replica_table), 3) * 2 do
+              qc = qc()
+              next_type = nil
+              case extra_state.type do
+                :prepare ->
+                  next_type = :precommit
+                :precommit ->
+                  next_type = :commit
+                :commit ->
+                  next_type = :decide
+              end
+              msg = generate_msg(state, next_type, nil, qc)
+              broadcast_to_others(state, msg)
+              extra_state = %{extra_state | type: next_type, count: 0}
+            end
+            extra_state = %{extra_state | count: receive_cnt}
+          end
+          leader(state, extra_state)
+
+        #Message received from client
+        {sender, :nop} ->
+          Logger.info("Leader #{whoami} receive client nop request")
+
     end
   end
 

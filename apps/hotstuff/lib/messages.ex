@@ -90,55 +90,49 @@ defmodule HotStuff.LogEntry do
   end
 end
 
-<<<<<<< HEAD
-=======
+
 defmodule HotStuff.Msg do
   @moduledoc """
   Utility 1 function Msg
->>>>>>> 7d1fbcd00748013875132861272821c499e96193
   """
   alias __MODULE__
 
   @enforce_keys [
-    :type, :viewNumber, :node, :justify
+    :type, :view_number, :node, :justify
   ]
   defstruct(
-    type: nil, viewNumber: nil, node: nil, justify: nil
+    type: nil, view_number: nil, node: nil, justify: nil
   )
-
   @doc """
   Create a new Msg
   """
-
   @spec new(
           any(),
           non_neg_integer(),
-          atom(),
+          any(),
           any()
         ) ::
           %Msg{
             type: any(),
-            viewNumber: non_neg_integer(),
-            node: atom(),
+            view_number: non_neg_integer(),
+            node: any(),
             justify: any()
           }
   def new(
       type,
-      viewNumber,
+      view_number,
       node,
       justify
       ) do
     %Msg{
       type: type,
-      viewNumber: viewNumber,
+      view_number: view_number,
       node: node,
       justify: justify
     }
   end
 end
 
-<<<<<<< HEAD
-=======
 defmodule HotStuff.VoteMsg do
   @moduledoc """
   Utility 2 function VoteMsg
@@ -146,7 +140,6 @@ defmodule HotStuff.VoteMsg do
   alias __MODULE__
 
   # @enforce_keys [
-
   # ]
   defstruct(
     message: nil, partialSig: nil
@@ -185,7 +178,7 @@ defmodule HotStuff.QC do
 
   # ]
   defstruct(
-    type: nil, viewNumber: nil, node: nil, sig: nil
+    type: nil, view_number: nil, node: nil, sig: nil
   )
 
   @doc """
@@ -200,23 +193,21 @@ defmodule HotStuff.QC do
         ) ::
           %QC{
             type: any(),
-            viewNumber: any(),
+            view_number: any(),
             node: any(),
             sig: any()
           }
   def new(
       type,
-      viewNumber,
+      view_number,
       node,
       sig
       ) do
     %QC{
       type: type,
-      viewNumber: viewNumber,
+      view_number: view_number,
       node: node,
       sig: sig
     }
   end
 end
-
->>>>>>> 7d1fbcd00748013875132861272821c499e96193
