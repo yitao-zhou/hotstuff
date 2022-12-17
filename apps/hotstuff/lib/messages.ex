@@ -97,11 +97,12 @@ defmodule HotStuff.Msg do
   """
   alias __MODULE__
 
-  @enforce_keys [
-    :type, :view_number, :node, :justify
-  ]
+  @enforce_keys [:type, :view_number, :node, :justify]
   defstruct(
-    type: nil, view_number: nil, node: nil, justify: nil
+    type: nil,
+    view_number: nil,
+    node: nil,
+    justify: nil
   )
   @doc """
   Create a new Msg
@@ -109,21 +110,16 @@ defmodule HotStuff.Msg do
   @spec new(
           any(),
           non_neg_integer(),
-          any(),
-          any()
+          %HotStuff.LogEntry{},
+          %HotStuff.QC{}
         ) ::
           %Msg{
             type: any(),
             view_number: non_neg_integer(),
-            node: any(),
-            justify: any()
+            node: %HotStuff.LogEntry{},
+            justify: %HotStuff.QC{}
           }
-  def new(
-      type,
-      view_number,
-      node,
-      justify
-      ) do
+  def new(type, view_number, node, justify) do
     %Msg{
       type: type,
       view_number: view_number,
@@ -139,28 +135,13 @@ defmodule HotStuff.VoteMsg do
   """
   alias __MODULE__
 
-  # @enforce_keys [
-  # ]
-  defstruct(
-    message: nil, partialSig: nil
-  )
-
-  @doc """
-  Create a new Msg
-  """
-
-  @spec new(
-          any(),
-          any()
-        ) ::
-          %VoteMsg{
-            message: any(),
-            partialSig: any()
-          }
-  def new(
-      message,
-      partialSig
-      ) do
+  # @enforce_keys []
+  defstruct(message: nil, partialSig: nil)
+  @spec new(%HotStuff.Msg{}, any()) ::%VoteMsg{
+          message: %HotStuff.Msg{},
+          partialSig: any()
+        }
+  def new(message, partialSig) do
     %VoteMsg{
       message: message,
       partialSig: partialSig
@@ -174,35 +155,17 @@ defmodule HotStuff.QC do
   """
   alias __MODULE__
 
-  # @enforce_keys [
-
-  # ]
+  # @enforce_keys []
   defstruct(
     type: nil, view_number: nil, node: nil, sig: nil
   )
-
-  @doc """
-  Create a new Msg
-  """
-
-  @spec new(
-          any(),
-          any(),
-          any(),
-          any()
-        ) ::
-          %QC{
-            type: any(),
-            view_number: any(),
-            node: any(),
-            sig: any()
-          }
-  def new(
-      type,
-      view_number,
-      node,
-      sig
-      ) do
+  @spec new(atom(), non_neg_integer(), %HotStuff.LogEntry{}, any()) ::%QC{
+          type: atom(),
+          view_number: non_neg_integer(),
+          node: %HotStuff.LogEntry{},
+          sig: any()
+        }
+  def new(type, view_number, node, sig) do
     %QC{
       type: type,
       view_number: view_number,
