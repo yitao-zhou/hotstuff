@@ -15,9 +15,9 @@ defmodule HotStuff do
   # required by the HotStuff protocol.
   defstruct(
     #The list of current processes
-    replica_table: nil
+    replica_table: nil,
 
-    view_id: nil,
+    curr_view: nil,
     current_leader: nil,
     is_leader: nil,
 
@@ -47,7 +47,10 @@ defmodule HotStuff do
       ) do
     %HotStuff{
       replica_table: replica_table,
-      view_id: 0,
+
+=======
+      curr_view: 1,
+>>>>>>> 7d1fbcd00748013875132861272821c499e96193
       current_leader: leader,
       is_leader: false,
       log: [],
@@ -103,6 +106,71 @@ defmodule HotStuff do
     end
   end
 
+  @doc """
+  This function is to generate a Msg given state, type, node, qc
+  """
+  @spec generate_msg(any(), any(), any(), any()) :: any()
+  def generate_msg(state, type, node, qc) do
+    HotStuff.Msg.new(type, state.curr_view, node, qc)
+  end
+
+  @doc """
+  This function is to generate a VoteMsg given state, type, node, qc
+  """
+  @spec generate_votemsg(any(), any(), any(), any()) :: any()
+  def generate_votemsg(state, type, node, qc) do
+    msg = generate_msg(state, type, node, qc)
+    # TODO: partial signature, replaced with a number right now instead
+    partialSig = 1
+
+    HotStuff.VoteMsg.new(msg, partialSig)
+  end
+
+  @doc """
+  This function is to create a leaf
+  """
+  @spec createLeaf(any(), any()) :: any()
+  def createLeaf(parent, cmd) do
+    raise "Not Yet Implemented"
+  end
+
+  @doc """
+  This function is to generate QC
+  """
+  @spec qc(any()) :: any()
+  def qc(v) do
+    # TODO: need to consider how to combine sigatures
+
+    # suppose v is implemented with a list of Msg, pick the first out of the V
+    message - Enum.at(v, 0)
+    # sig needs to be changed
+    sig = 1
+    HotStuff.QC.new(message.type, message.viewNumber, message.node, sig)
+  end
+
+  @doc """
+  This function is to check matching msg
+  """
+  @spec matching_Msg(any(), any(), any()) :: boolean()
+  def matching_Msg(message, type, view) do
+    message.type == type and message.viewNumber == view
+  end
+
+  @doc """
+  This function is to check matching qc
+  """
+  @spec matching_qc(any(), any(), any()) :: boolean()
+  def matching_qc(qc, type, view) do
+    qc.type == type and qc.viewNumber == view
+  end
+
+  @doc """
+  This function is to check matching qc
+  """
+  @spec safeNode(any(), any()) :: boolean()
+  def safeNode(node, qc) do
+    raise "Not Yet Implemented"
+  end
 
   @doc """
   This function transitions a process so it is a primary.
@@ -111,6 +179,7 @@ defmodule HotStuff do
   def become_leader(state) do
     Logger.info("Process #{inspect(whoami())} become leader")
     state = %{state | is_leader: true}
+    leader(state, %{})
   end
 
   @doc """
@@ -128,16 +197,16 @@ defmodule HotStuff do
   @doc """
   This function makes a replica as backup
   """
-  @spec become_backup(%PBFT{is_primary: false}) :: no_return()
-  def become_backup(state) do
+  @spec become_replica(%HotStuff{is_leader: false}) :: no_return()
+  def become_replica(state) do
     raise "Not yet implemented"
   end
 
   @doc """
 
   """
-  @spec backup(%PBFT{is_primary: false}, any()) :: no_return()
-  def backup(state, extra_state) do
+  @spec replica(%HotStuff{is_leader: false}, any()) :: no_return()
+  def replica(state, extra_state) do
     receive do
       {sender, :nop} ->
         send(sender, :ok)
@@ -156,15 +225,15 @@ defmodule HotStuff.Client do
   requests to the RSM.
   """
   alias __MODULE__
-  @enforce_keys [:primaryID]
-  defstruct(primaryID: nil)
+  @enforce_keys [:leaderID]
+  defstruct(leaderID: nil)
 
   @doc """
   Construct a new PBFT Client.
   """
-  @spec new_client(atom()) :: %Client{primaryID: atom()}
+  @spec new_client(atom()) :: %Client{leaderID: atom()}
   def new_client(member) do
-    %Client{primaryID: member}
+    %Client{leaderID: member}
   end
 
   @doc """
@@ -172,8 +241,8 @@ defmodule HotStuff.Client do
   """
   @spec nop(%Client{}) :: {:ok, %Client{}}
   def nop(client) do
-    primary = client.primaryID
-    send(primary, :nop)
+    leader = client.leaderID
+    send(leader, :nop)
 
     receive do
       # {_, {:redirect, new_leader}} ->

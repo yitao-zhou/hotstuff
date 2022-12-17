@@ -90,27 +90,24 @@ defmodule HotStuff.LogEntry do
   end
 end
 
-defmodule HotStuff.RequestMessage do
+<<<<<<< HEAD
+=======
+defmodule HotStuff.Msg do
   @moduledoc """
-  RequestMessage sent by client to the replicas
+  Utility 1 function Msg
+>>>>>>> 7d1fbcd00748013875132861272821c499e96193
   """
   alias __MODULE__
 
   @enforce_keys [
-    :operation,
-    :timestamp,
-    :client,
-    :signature
+    :type, :viewNumber, :node, :justify
   ]
   defstruct(
-    operation: nil,
-    timestamp: nil,
-    client: nil,
-    signature: nil
+    type: nil, viewNumber: nil, node: nil, justify: nil
   )
 
   @doc """
-  Create a new RequestMessage
+  Create a new Msg
   """
 
   @spec new(
@@ -119,59 +116,107 @@ defmodule HotStuff.RequestMessage do
           atom(),
           any()
         ) ::
-          %RequestMessage{
-            operation: any(),
-            timestamp: non_neg_integer(),
-            client: atom(),
-            signature: any()
+          %Msg{
+            type: any(),
+            viewNumber: non_neg_integer(),
+            node: atom(),
+            justify: any()
           }
   def new(
-          operation,
-          timestamp,
-          client,
-          signature
+      type,
+      viewNumber,
+      node,
+      justify
       ) do
-    %RequestMessage{
-      operation: operation,
-      timestamp: timestamp,
-      client: client,
-      signature: signature
+    %Msg{
+      type: type,
+      viewNumber: viewNumber,
+      node: node,
+      justify: justify
     }
   end
 end
 
-#Define the data structure used in HotStuff
-defmodule HotStuff.qc do
-  defstruct[:type, :view_id, :branch_height, :sig]
-end
-
-
-
-defmodule HotStuff.NewViewMessage do
+<<<<<<< HEAD
+=======
+defmodule HotStuff.VoteMsg do
   @moduledoc """
-  Sent by a replica when it transition into new view_id and carries the highest prepared_qc received by the replica
+  Utility 2 function VoteMsg
   """
-  alias HotStuff.NewViewMessage
   alias __MODULE__
-  @enforce_keys[
-    :view_id,
-    :prepared_qc
-  ]
+
+  # @enforce_keys [
+
+  # ]
   defstruct(
-    view_id: nil,
-    #prepared_qc is the highest block index of the given replica
-    prepared_qc: nil
+    message: nil, partialSig: nil
   )
 
-  @spec new(non_neg_integer(), %HotStuff.qc{}) ::
-    %NewViewMessage{
-      view_id: non_neg_integer(),
-      prepared_qc: non_neg_integer()
+  @doc """
+  Create a new Msg
+  """
+
+  @spec new(
+          any(),
+          any()
+        ) ::
+          %VoteMsg{
+            message: any(),
+            partialSig: any()
+          }
+  def new(
+      message,
+      partialSig
+      ) do
+    %VoteMsg{
+      message: message,
+      partialSig: partialSig
     }
-    def new(view_id, prepared_qc) do
-      %NewViewMessage{
-        view_id: view_id,
-        prepared_qc: prepared_qc
-      }
-    end
+  end
 end
+
+defmodule HotStuff.QC do
+  @moduledoc """
+  quorum certificate
+  """
+  alias __MODULE__
+
+  # @enforce_keys [
+
+  # ]
+  defstruct(
+    type: nil, viewNumber: nil, node: nil, sig: nil
+  )
+
+  @doc """
+  Create a new Msg
+  """
+
+  @spec new(
+          any(),
+          any(),
+          any(),
+          any()
+        ) ::
+          %QC{
+            type: any(),
+            viewNumber: any(),
+            node: any(),
+            sig: any()
+          }
+  def new(
+      type,
+      viewNumber,
+      node,
+      sig
+      ) do
+    %QC{
+      type: type,
+      viewNumber: viewNumber,
+      node: node,
+      sig: sig
+    }
+  end
+end
+
+>>>>>>> 7d1fbcd00748013875132861272821c499e96193

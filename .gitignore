@@ -7,7 +7,9 @@
 # The directory Mix downloads your dependencies sources to.
 /deps/
 
-/apps/pbft/log/
+/apps/hotstuff/log/
+
+/apps/emulation/log/
 
 /log/
 
