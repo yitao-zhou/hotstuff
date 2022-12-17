@@ -47,7 +47,7 @@ defmodule HotStuff do
       ) do
     %HotStuff{
       replica_table: replica_table,
-      view_id: 1,
+      view_id: 0,
       current_leader: leader,
       is_leader: false,
       log: [],
@@ -117,8 +117,8 @@ defmodule HotStuff do
   This function implements the state machine for a process
   that is currently a primary.
   """
-  @spec leader(%PBFT{is_primary: true}, any()) :: no_return()
-  def primary(state, extra_state) do
+  @spec leader(%HotStuff{is_leader: true}, any()) :: no_return()
+  def leader(state, extra_state) do
     receive do
       {sender, :nop} ->
         send(sender, :ok)
