@@ -120,24 +120,6 @@ defmodule HotStuff do
   end
 
   @doc """
-  Add log entries to the log. This adds entries to the beginning
-  of the log, we assume that entries are already correctly ordered
-  (see structural note about log above.).
-  """
-  @spec add_log_entries(%HotStuff{}, [%HotStuff.LogEntry{}]) :: %HotStuff{}
-  def add_log_entries(state, entries) do
-    %{state | log: entries ++ state.log}
-  end
-
-  @doc """
-  Get index for the last log entry.
-  """
-  @spec get_last_log_height(%HotStuff{}) :: non_neg_integer()
-  def get_last_log_height(state) do
-    Enum.at(state.log, 0, HotStuff.LogEntry.empty()).height
-  end
-
-  @doc """
   This function is to generate a Msg given state, type, node, qc
   """
   @spec generate_msg(any(), any(), any(), any()) :: any()
@@ -162,7 +144,8 @@ defmodule HotStuff do
   """
   @spec create_leaf(%HotStuff.QC{}, %HotStuff.LogEntry{}) :: %HotStuff.LogEntry{}
   def createLeaf(high_qc, proposal_node) do
-    %{proposal_node | parent: high_qc.node}
+    #Hash the parent node and assign hash value to the new log entry
+    %{proposal_node | parent: crypto.hash(:sha256, high_qc.node)}
   end
 
   @doc """
@@ -180,8 +163,8 @@ defmodule HotStuff do
   @doc """
   This function is to check matching msg
   """
-  @spec matching_Msg(atom(), non_neg_integer(), atom(), non_neg_integer()) :: boolean()
-  def matching_Msg(message_type, message_view, type, view) do
+  @spec matching_msg(atom(), non_neg_integer(), atom(), non_neg_integer()) :: boolean()
+  def matching_msg(message_type, message_view, type, view) do
     message_type == type and message_view == view
   end
 
@@ -233,8 +216,8 @@ defmodule HotStuff do
         justify: qc
       }} ->
         #Tracking :new_view message received from followers and put them into the collector
-        if (matching_Msg(type, view_number, extra_state.type, state.curr_view-1)) do
-          %{extra_state | collector: qc ++ extra_state.collector}
+        if (matching_msg(type, view_number, extra_state.type, state.curr_view-1)) do
+          extra_state = %{extra_state | collector: qc ++ extra_state.collector}
           #Wait for (n-f-1) = 2f :new_view message from the followers
           if get_majority(state, extra_state) do
             high_qc =
@@ -259,8 +242,8 @@ defmodule HotStuff do
           partial_sig: partial_sig
         }} ->
           #For each phase, collect the partial sig received from follower
-          if (matching_Msg(message.type, message.view_number, extra_state.type, state.curr_view)) do
-            %{extra_state | collector: partial_sig ++ extra_state.collector}
+          if (matching_msg(message.type, message.view_number, extra_state.type, state.curr_view)) do
+            extra_state = %{extra_state | collector: partial_sig ++ extra_state.collector}
             #Wait for (n-f) votes
             if get_majority(state, extra_state) do
               #combine the partial signature through threshold signature
@@ -285,6 +268,18 @@ defmodule HotStuff do
         #Message received from client
         {sender, :nop} ->
           Logger.info("Leader #{whoami} receive client nop request")
+          state = %{state | node_to_propose: HotStuff.LogEntry.nop(state.curr_view, sender, nil)}
+          leader(state, extra_state)
+
+        {sender, {:enq, item}} ->
+          Logger.info("Leader #{whoami} receive client enq request")
+          state = %{state | node_to_propose: HotStuff.LogEntry.enqueue(state.curr_view, sender, item, nil)}
+          leader(state, extra_state)
+
+        {sender, :deq} ->
+          Logger.info("Leader #{whoami} receive client deq request")
+          state = %{state | node_to_propose: HotStuff.LogEntry.dequeue(state.curr_view, sender, nil)}
+          leader(state, extra_state)
 
     end
   end
