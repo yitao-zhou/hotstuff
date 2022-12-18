@@ -25,11 +25,12 @@ defmodule HotStuff do
     #with latter entries (lower node in the tree) closer to the head of the list
     log: nil,
 
+    #highest qc which a replica voted pre-commit
     prepared_qc: nil,
+    precommit_qc: nil,
+    commit_qc: nil,
     #The highest qc (index the replica voted commit)
     locked_qc: nil,
-    #highest qc which a replica voted pre-commit
-    prepare_qc: nil,
 
     node_to_propose: nil,
 
@@ -52,7 +53,7 @@ defmodule HotStuff do
       ) do
     %HotStuff{
       replica_table: replica_table,
-      curr_view: 1,
+      curr_view: 0,
       current_leader: leader,
       is_leader: false,
       log: [],
@@ -195,8 +196,17 @@ defmodule HotStuff do
   @spec become_leader(%HotStuff{}) :: no_return()
   def become_leader(state) do
     Logger.info("Process #{inspect(whoami())} become leader in view #{inspect(state.curr_view)}")
-    state = %{state | is_leader: true}
+    state = %{state | is_leader: true, current_leader: whoami()}
     leader(state, %{type: :new_view, collector: [state.prepared_qc]})
+  end
+
+  @doc """
+  The leader will rotate based on the curr_view number.
+  """
+  @spec get_current_leader(%HotStuff{}) :: any()
+  def get_current_leader(state) do
+    leader_index = rem(state.curr_view, length(state.replica_table))
+    Enum.at(state.replica_table, leader_index)
   end
 
   @doc """
@@ -247,23 +257,32 @@ defmodule HotStuff do
             #Wait for (n-f) votes
             if get_majority(state, extra_state) do
               #combine the partial signature through threshold signature
-              state.prepared_qc = create_quorum_cert(message, extra_state.collector)
-              next_type =
-                case extra_state.type do
-                  :prepare ->
-                    :precommit
-                  :precommit ->
-                    :commit
-                  :commit ->
-                    :decide
-                end
-              msg = generate_msg(state, next_type, nil, state.prepared_qc)
+              qc = create_quorum_cert(message, extra_state.collector)
+              case extra_state.type do
+                :prepare ->
+                  state.prepared_qc = qc
+                  extra_state = %{extra_state | type: :precommit}
+                :precommit ->
+                  state.precommit_qc = qc
+                  extra_state = %{extra_state | type: :commit}
+                :commit ->
+                  state.commit_qc = qc
+                  extra_state = %{extra_state | type: :decide}
+              end
+              msg = generate_msg(state, extra_state.type, nil, state.prepared_qc)
               broadcast_to_others(state, msg)
-              #Leader go into next phase
-              extra_state = %{extra_state | type: next_type, collector: []}
+
+              #Leader go into next phase or become a follower once sending the decide message
+              if (extra_state.type == :decide) do
+                state = %{state | curr_view: state.curr_view + 1}
+                become_replica(state)
+              else
+                extra_state = %{extra_state | type: next_type, collector: []}
+                leader(state, extra_state)
+              end
             end
           end
-          leader(state, extra_state)
+
 
         #Message received from client
         {sender, :nop} ->
@@ -289,7 +308,9 @@ defmodule HotStuff do
   """
   @spec become_replica(%HotStuff{is_leader: false}) :: no_return()
   def become_replica(state) do
-    raise "Not yet implemented"
+    Logger.info("Process #{inspect(whoami())} become follower in view #{inspect(state.curr_view)}")
+    state = %{state | is_leader: false, current_leader: get_current_leader(state)}
+    follower(state, nil)
   end
 
   @doc """
