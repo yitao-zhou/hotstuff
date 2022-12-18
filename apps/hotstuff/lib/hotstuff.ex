@@ -25,10 +25,13 @@ defmodule HotStuff do
     #with latter entries (lower node in the tree) closer to the head of the list
     log: nil,
 
+    prepared_qc: nil,
     #The highest qc (index the replica voted commit)
     locked_qc: nil,
     #highest qc which a replica voted pre-commit
     prepare_qc: nil,
+
+    node_to_propose: nil,
 
     #In this simulation the RSM we are building is a queue
     queue: nil
@@ -157,20 +160,18 @@ defmodule HotStuff do
   @doc """
   This function is to create a leaf
   """
-  @spec createLeaf(any(), any()) :: any()
-  def createLeaf(parent, cmd) do
-
+  @spec create_leaf(%HotStuff.QC{}, %HotStuff.LogEntry{}) :: %HotStuff.LogEntry{}
+  def createLeaf(high_qc, proposal_node) do
+    %{proposal_node | parent: high_qc.node}
   end
 
   @doc """
   This function is to generate QC
   """
-  @spec qc(any()) :: any()
-  def qc(v) do
-    # TODO: need to consider how to combine sigatures
+  @spec create_quorum_cert(%HotStuff.Msg{}, any()) :: any()
+  def create_quorum_cert(message, partial_sigs) do
+    # TODO: need to consider how to combine partial sigatures
 
-    # suppose v is implemented with a list of Msg, pick the first out of the V
-    message - Enum.at(v, 0)
     # sig needs to be changed
     sig = 1
     HotStuff.QC.new(message.type, message.viewNumber, message.node, sig)
@@ -179,7 +180,7 @@ defmodule HotStuff do
   @doc """
   This function is to check matching msg
   """
-  @spec matching_Msg(any(), any(), any(), any()) :: boolean()
+  @spec matching_Msg(atom(), non_neg_integer(), atom(), non_neg_integer()) :: boolean()
   def matching_Msg(message_type, message_view, type, view) do
     message_type == type and message_view == view
   end
@@ -200,14 +201,19 @@ defmodule HotStuff do
     raise "Not Yet Implemented"
   end
 
+  @spec get_majority(%HotStuff{}, any()) :: boolean()
+  def getMajority(state, extra_state) do
+    length(extra_state.collector) > Integer.floor_div(length(state.replica_table), 3) * 2
+  end
+
   @doc """
   This function transitions a process so it is a primary.
   """
   @spec become_leader(%HotStuff{}) :: no_return()
   def become_leader(state) do
-    Logger.info("Process #{inspect(whoami())} become leader")
+    Logger.info("Process #{inspect(whoami())} become leader in view #{inspect(state.curr_view)}")
     state = %{state | is_leader: true}
-    leader(state, %{msg_type: :new_view, count: 0})
+    leader(state, %{type: :new_view, collector: [state.prepared_qc]})
   end
 
   @doc """
@@ -226,22 +232,24 @@ defmodule HotStuff do
         node: log_entry,
         justify: qc
       }} ->
-        high_qc = state.prepared_qc
-        #Tracking the number of :new_view message received and the highest_qc received
-        if (matching_Msg(type, view_number, extra_state.type, state.curr_view)) do
-          receive_cnt = extra_state.count + 1
-          if qc.view_number > high_qc.view_number do
-            high_qc = qc
-          end
-          #Wait for (n-f-1) new view message -> including leader itself there are (n-f) messages
-          if receive_cnt > Integer.floor_div(length(state.replica_table), 3) * 2 do
-            node_proposal = createLeaf()
+        #Tracking :new_view message received from followers and put them into the collector
+        if (matching_Msg(type, view_number, extra_state.type, state.curr_view-1)) do
+          %{extra_state | collector: qc ++ extra_state.collector}
+          #Wait for (n-f-1) = 2f :new_view message from the followers
+          if get_majority(state, extra_state) do
+            high_qc =
+              extra_state.collector
+              |> Enum.max_by(fn x->x.view_number end)
+            #Create the node to be proposed by extending from the high_qc node
+            node_proposal = create_leaf(high_qc, node_to_propose)
             #create the prepare message and broadcast to all the follwers
             prepare_msg = generate_msg(state, :prepare, node_proposal, high_qc)
             broadcast_to_others(state, prepare_msg)
-            extra_state = %{extra_state | type: :prepare, count: 0}
+            #The leader enters the prepare phase after the broadcast
+            extra_state = %{extra_state | type: :prepare, collector: []}
           end
-          extra_state = %{extra_state | count: receive_cnt}
+        else
+          Logger.info("leader #{inspect(whoami())} receive unexpected message")
         end
         leader(state, extra_state)
 
@@ -250,25 +258,27 @@ defmodule HotStuff do
           message: message,
           partial_sig: partial_sig
         }} ->
+          #For each phase, collect the partial sig received from follower
           if (matching_Msg(message.type, message.view_number, extra_state.type, state.curr_view)) do
-            receive_cnt = extra_state.count + 1
+            %{extra_state | collector: partial_sig ++ extra_state.collector}
             #Wait for (n-f) votes
-            if receive_cnt > Integer.floor_div(length(state.replica_table), 3) * 2 do
-              qc = qc()
-              next_type = nil
-              case extra_state.type do
-                :prepare ->
-                  next_type = :precommit
-                :precommit ->
-                  next_type = :commit
-                :commit ->
-                  next_type = :decide
-              end
-              msg = generate_msg(state, next_type, nil, qc)
+            if get_majority(state, extra_state) do
+              #combine the partial signature through threshold signature
+              state.prepared_qc = create_quorum_cert(message, extra_state.collector)
+              next_type =
+                case extra_state.type do
+                  :prepare ->
+                    :precommit
+                  :precommit ->
+                    :commit
+                  :commit ->
+                    :decide
+                end
+              msg = generate_msg(state, next_type, nil, state.prepared_qc)
               broadcast_to_others(state, msg)
-              extra_state = %{extra_state | type: next_type, count: 0}
+              #Leader go into next phase
+              extra_state = %{extra_state | type: next_type, collector: []}
             end
-            extra_state = %{extra_state | count: receive_cnt}
           end
           leader(state, extra_state)
 
