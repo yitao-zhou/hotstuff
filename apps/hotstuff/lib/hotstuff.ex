@@ -189,6 +189,15 @@ defmodule HotStuff do
   end
 
   @doc """
+  The leader will rotate based on the curr_view number.
+  """
+  @spec get_current_leader(%HotStuff{}) :: any()
+  def get_current_leader(state) do
+    leader_index = rem(state.curr_view, length(state.replica_table))
+    Enum.at(state.replica_table, leader_index)
+  end
+
+  @doc """
   This function transitions a process so it is a primary.
   """
   @spec become_leader(%HotStuff{}) :: no_return()
@@ -196,15 +205,6 @@ defmodule HotStuff do
     Logger.info("Process #{inspect(whoami())} become leader in view #{inspect(state.curr_view)}")
     state = %{state | is_leader: true, current_leader: whoami()}
     leader(state, %{type: :new_view, collector: [state.prepared_qc]})
-  end
-
-  @doc """
-  The leader will rotate based on the curr_view number.
-  """
-  @spec get_current_leader(%HotStuff{}) :: any()
-  def get_current_leader(state) do
-    leader_index = rem(state.curr_view, length(state.replica_table))
-    Enum.at(state.replica_table, leader_index)
   end
 
   @doc """
@@ -350,11 +350,10 @@ defmodule HotStuff do
                safeNode(state, node_proposal, high_qc) do
             vote_msg = generate_votemsg(state, type, node_proposal, nil)
             send(state.current_leader, vote_msg)
-            %{extra_state | type: :precommit}
           end
         end
 
-        replica(state, extra_state)
+        replica(state, %{extra_state | type: :precommit})
 
       {sender,
        {:precommit,
@@ -369,10 +368,9 @@ defmodule HotStuff do
           %{state | prepared_qc: prepared_qc}
           vote_msg = generate_votemsg(state, type, prepared_qc.node, nil)
           send(state.current_leader, vote_msg)
-          %{extra_state | type: :commit}
         end
 
-        replica(state, extra_state)
+        replica(state, %{extra_state | type: :commit})
 
       {sender,
        {:commit,
@@ -387,10 +385,9 @@ defmodule HotStuff do
           %{state | locked_qc: precommit_qc}
           vote_msg = generate_votemsg(state, type, precommit_qc.node, nil)
           send(state.current_leader, vote_msg)
-          %{extra_state | type: :decide}
         end
 
-        replica(state, extra_state)
+        replica(state, %{extra_state | type: :decide})
 
       {sender,
        {:decide,
@@ -407,8 +404,13 @@ defmodule HotStuff do
           {{requester, return_value}, new_state} = commit_log_entry(state, entry)
           send(requester, return_value)
         end
-
-        replica(state, extra_state)
+        #Increment the view number and check if it will turn into leader in the next view
+        state = %{state | curr_view: state.curr_view + 1}
+        if (get_current_leader(state) == whoami()) do
+          become_leader(state)
+        else
+          replica(state, %{extra_state | type: prepare})
+        end
 
       # Messages from external clients. Redirect the client to leader of the view
       {sender, :nop} ->
