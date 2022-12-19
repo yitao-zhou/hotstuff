@@ -14,27 +14,25 @@ defmodule HotStuff do
   # This structure contains all the process state
   # required by the HotStuff protocol.
   defstruct(
-    #The list of current processes
+    # The list of current processes
     replica_table: nil,
-
     curr_view: nil,
     current_leader: nil,
     is_leader: nil,
 
-    #Log is the highest tree branch kown to the replica, and we save the brach as a list
-    #with latter entries (lower node in the tree) closer to the head of the list
+    # Log is the highest tree branch kown to the replica, and we save the brach as a list
+    # with latter entries (lower node in the tree) closer to the head of the list
     log: nil,
 
-    #highest qc which a replica voted pre-commit
+    # highest qc which a replica voted pre-commit
     prepared_qc: nil,
     precommit_qc: nil,
     commit_qc: nil,
-    #The highest qc (index the replica voted commit)
+    # The highest qc (index the replica voted commit)
     locked_qc: nil,
-
     node_to_propose: nil,
 
-    #In this simulation the RSM we are building is a queue
+    # In this simulation the RSM we are building is a queue
     queue: nil
   )
 
@@ -91,15 +89,15 @@ defmodule HotStuff do
           {{atom() | pid(), :ok | :empty | {:value, any()}}, %HotStuff{}}
   def commit_log_entry(state, entry) do
     case entry do
-      %HotStuff.LogEntry{operation: :nop, requester: r, height: i} ->
-        {{r, :ok}, %{state | commit_height: i}}
+      %HotStuff.LogEntry{operation: :nop, requester: r} ->
+        {{r, :ok}, state}
 
-      %HotStuff.LogEntry{operation: :enq, requester: r, argument: e, height: i} ->
-        {{r, :ok}, %{enqueue(state, e) | commit_height: i}}
+      %HotStuff.LogEntry{operation: :enq, requester: r, argument: e} ->
+        {{r, :ok}, enqueue(state, e)}
 
-      %HotStuff.LogEntry{operation: :deq, requester: r, height: i} ->
+      %HotStuff.LogEntry{operation: :deq, requester: r} ->
         {ret, state} = dequeue(state)
-        {{r, ret}, %{state | commit_height: i}}
+        {{r, ret}, sate}
 
       %HotStuff.LogEntry{} ->
         raise "Log entry with an unknown operation: maybe an empty entry?"
@@ -115,7 +113,7 @@ defmodule HotStuff do
   defp broadcast_to_others(state, message) do
     me = whoami()
 
-    state.view
+    state.replica_table
     |> Enum.filter(fn pid -> pid != me end)
     |> Enum.map(fn pid -> send(pid, message) end)
   end
@@ -145,7 +143,7 @@ defmodule HotStuff do
   """
   @spec create_leaf(%HotStuff.QC{}, %HotStuff.LogEntry{}) :: %HotStuff.LogEntry{}
   def createLeaf(high_qc, proposal_node) do
-    #Hash the parent node and assign hash value to the new log entry
+    # Hash the parent node and assign hash value to the new log entry
     %{proposal_node | parent: crypto.hash(:sha256, high_qc.node)}
   end
 
@@ -180,8 +178,8 @@ defmodule HotStuff do
   @doc """
   This function is to check matching qc
   """
-  @spec safeNode(any(), any()) :: boolean()
-  def safeNode(node, qc) do
+  @spec safeNode(%HotStuff{}, any(), any()) :: boolean()
+  def safeNode(state, node, qc) do
     raise "Not Yet Implemented"
   end
 
@@ -214,92 +212,107 @@ defmodule HotStuff do
   that is currently a primary.
   """
   @spec leader(%HotStuff{is_leader: true}, any()) :: no_return()
-  #Use the `extra_state` to track the phase leader is in
-  #and the number of different type of qc it have received in given phase
+  # Use the `extra_state` to track the phase leader is in
+  # and the number of different type of qc it have received in given phase
   def leader(state, extra_state) do
     receive do
       {sender,
-      %HotStuff.Msg{
-        type: type
-        view_number: view_number,
-        node: log_entry,
-        justify: qc
-      }} ->
-        #Tracking :new_view message received from followers and put them into the collector
-        if (matching_msg(type, view_number, extra_state.type, state.curr_view-1)) do
+       %HotStuff.Msg{
+         type: type,
+         view_number: view_number,
+         node: log_entry,
+         justify: qc
+       }} ->
+        # Tracking :new_view message received from followers and put them into the collector
+        if matching_msg(type, view_number, extra_state.type, state.curr_view - 1) do
           extra_state = %{extra_state | collector: qc ++ extra_state.collector}
-          #Wait for (n-f-1) = 2f :new_view message from the followers
+          # Wait for (n-f-1) = 2f :new_view message from the followers
           if get_majority(state, extra_state) do
             high_qc =
               extra_state.collector
-              |> Enum.max_by(fn x->x.view_number end)
-            #Create the node to be proposed by extending from the high_qc node
+              |> Enum.max_by(fn x -> x.view_number end)
+
+            # Create the node to be proposed by extending from the high_qc node
             node_proposal = create_leaf(high_qc, node_to_propose)
-            #create the prepare message and broadcast to all the follwers
+            # create the prepare message and broadcast to all the follwers
             prepare_msg = generate_msg(state, :prepare, node_proposal, high_qc)
-            broadcast_to_others(state, prepare_msg)
-            #The leader enters the prepare phase after the broadcast
+            broadcast_to_others(state, {:prepare, prepare_msg})
+            # The leader enters the prepare phase after the broadcast
             extra_state = %{extra_state | type: :prepare, collector: []}
           end
         else
           Logger.info("leader #{inspect(whoami())} receive unexpected message")
         end
+
         leader(state, extra_state)
 
-        {sender,
-        %HotStuff.VoteMsg{
-          message: message,
-          partial_sig: partial_sig
-        }} ->
-          #For each phase, collect the partial sig received from follower
-          if (matching_msg(message.type, message.view_number, extra_state.type, state.curr_view)) do
-            extra_state = %{extra_state | collector: partial_sig ++ extra_state.collector}
-            #Wait for (n-f) votes
-            if get_majority(state, extra_state) do
-              #combine the partial signature through threshold signature
-              qc = create_quorum_cert(message, extra_state.collector)
-              case extra_state.type do
-                :prepare ->
-                  state.prepared_qc = qc
-                  extra_state = %{extra_state | type: :precommit}
-                :precommit ->
-                  state.precommit_qc = qc
-                  extra_state = %{extra_state | type: :commit}
-                :commit ->
-                  state.commit_qc = qc
-                  extra_state = %{extra_state | type: :decide}
-              end
-              msg = generate_msg(state, extra_state.type, nil, state.prepared_qc)
-              broadcast_to_others(state, msg)
+      {sender,
+       %HotStuff.VoteMsg{
+         message: message,
+         partial_sig: partial_sig
+       }} ->
+        # For each phase, collect the partial sig received from follower
+        if matching_msg(message.type, message.view_number, extra_state.type, state.curr_view) do
+          extra_state = %{extra_state | collector: partial_sig ++ extra_state.collector}
+          # Wait for (n-f) votes
+          if get_majority(state, extra_state) do
+            # combine the partial signature through threshold signature
+            qc = create_quorum_cert(message, extra_state.collector)
 
-              #Leader go into next phase or become a follower once sending the decide message
-              if (extra_state.type == :decide) do
-                state = %{state | curr_view: state.curr_view + 1}
-                become_replica(state)
-              else
-                extra_state = %{extra_state | type: next_type, collector: []}
-                leader(state, extra_state)
-              end
+            case extra_state.type do
+              :prepare ->
+                state = %{state | prepared_qc: qc}
+                extra_state = %{extra_state | type: :precommit}
+
+              :precommit ->
+                state = %{state | precommit_qc: qc}
+                extra_state = %{extra_state | type: :commit}
+
+              :commit ->
+                state = %{state | commit_qc: qc}
+                extra_state = %{extra_state | type: :decide}
+            end
+
+            msg = generate_msg(state, extra_state.type, nil, qc)
+            broadcast_to_others(state, {extra_state.type, msg})
+
+            # Leader go into next phase or become a follower once sending the decide message
+            if extra_state.type == :decide do
+              state = %{state | curr_view: state.curr_view + 1}
+              become_replica(state)
+            else
+              extra_state = %{extra_state | collector: []}
             end
           end
+        end
 
+        leader(state, extra_state)
 
-        #Message received from client
-        {sender, :nop} ->
-          Logger.info("Leader #{whoami} receive client nop request")
-          state = %{state | node_to_propose: HotStuff.LogEntry.nop(state.curr_view, sender, nil)}
-          leader(state, extra_state)
+      # Message received from client
+      {sender, :nop} ->
+        Logger.info("Leader #{whoami} receive client nop request")
+        state = %{state | node_to_propose: HotStuff.LogEntry.nop(state.curr_view, sender, nil)}
+        leader(state, extra_state)
 
-        {sender, {:enq, item}} ->
-          Logger.info("Leader #{whoami} receive client enq request")
-          state = %{state | node_to_propose: HotStuff.LogEntry.enqueue(state.curr_view, sender, item, nil)}
-          leader(state, extra_state)
+      {sender, {:enq, item}} ->
+        Logger.info("Leader #{whoami} receive client enq request")
 
-        {sender, :deq} ->
-          Logger.info("Leader #{whoami} receive client deq request")
-          state = %{state | node_to_propose: HotStuff.LogEntry.dequeue(state.curr_view, sender, nil)}
-          leader(state, extra_state)
+        state = %{
+          state
+          | node_to_propose: HotStuff.LogEntry.enqueue(state.curr_view, sender, item, nil)
+        }
 
+        leader(state, extra_state)
+
+      {sender, :deq} ->
+        Logger.info("Leader #{whoami} receive client deq request")
+
+        state = %{
+          state
+          | node_to_propose: HotStuff.LogEntry.dequeue(state.curr_view, sender, nil)
+        }
+
+        leader(state, extra_state)
     end
   end
 
@@ -308,9 +321,12 @@ defmodule HotStuff do
   """
   @spec become_replica(%HotStuff{is_leader: false}) :: no_return()
   def become_replica(state) do
-    Logger.info("Process #{inspect(whoami())} become follower in view #{inspect(state.curr_view)}")
+    Logger.info(
+      "Process #{inspect(whoami())} become follower in view #{inspect(state.curr_view)}"
+    )
+
     state = %{state | is_leader: false, current_leader: get_current_leader(state)}
-    follower(state, nil)
+    follower(state, %{type: :prepare})
   end
 
   @doc """
@@ -319,8 +335,96 @@ defmodule HotStuff do
   @spec replica(%HotStuff{is_leader: false}, any()) :: no_return()
   def replica(state, extra_state) do
     receive do
+      # Message received from leader
+      {sender,
+       {:prepare,
+        %HotStuff.Msg{
+          type: type,
+          view_number: view_number,
+          node: node_proposal,
+          justify: high_qc
+        }}} ->
+        if sender == state.current_leader &&
+             matching_msg(type, view_number, extra_state.type, state.curr_view) do
+          if node_proposal.parent == crypto.hash(:sha256, high_qc.node) &&
+               safeNode(state, node_proposal, high_qc) do
+            vote_msg = generate_votemsg(state, type, node_proposal, nil)
+            send(state.current_leader, vote_msg)
+            %{extra_state | type: :precommit}
+          end
+        end
+
+        replica(state, extra_state)
+
+      {sender,
+       {:precommit,
+        %HotStuff.Msg{
+          type: type,
+          view_number: view_number,
+          node: node,
+          justify: prepared_qc
+        }}} ->
+        if sender == state.current_leader &&
+             matching_qc(prepared_qc, extra_state.type, state.curr_view) do
+          %{state | prepared_qc: prepared_qc}
+          vote_msg = generate_votemsg(state, type, prepared_qc.node, nil)
+          send(state.current_leader, vote_msg)
+          %{extra_state | type: :commit}
+        end
+
+        replica(state, extra_state)
+
+      {sender,
+       {:commit,
+        %HotStuff.Msg{
+          type: type,
+          view_number: view_number,
+          node: node,
+          justify: precommit_qc
+        }}} ->
+        if sender == state.current_leader &&
+             matching_qc(precommit_qc, extra_state.type, state.curr_view) do
+          %{state | locked_qc: precommit_qc}
+          vote_msg = generate_votemsg(state, type, precommit_qc.node, nil)
+          send(state.current_leader, vote_msg)
+          %{extra_state | type: :decide}
+        end
+
+        replica(state, extra_state)
+
+      {sender,
+       {:decide,
+        %HotStuff.Msg{
+          type: type,
+          view_number: view_number,
+          node: node,
+          justify: commit_qc
+        }}} ->
+        if sender == state.current_leader &&
+             matching_qc(commit_qc, extra_state.type, state.curr_view) do
+          # Execute the commited logEntry and response to the client
+          entry = commit_qc.node
+          {{requester, return_value}, new_state} = commit_log_entry(state, entry)
+          send(requester, return_value)
+        end
+
+        replica(state, extra_state)
+
+      # Messages from external clients. Redirect the client to leader of the view
       {sender, :nop} ->
-        send(sender, :ok)
+        Logger.info("Follower #{whoami} receive client nop request")
+        send(sender, {:redirect, state.current_leader})
+        follower(state, extra_state)
+
+      {sender, {:enq, item}} ->
+        Logger.info("Follower #{whoami} receive client enq request")
+        send(sender, {:redirect, state.current_leader})
+        follower(state, extra_state)
+
+      {sender, :deq} ->
+        Logger.info("Follower #{whoami} receive client enq request")
+        send(sender, {:redirect, state.current_leader})
+        follower(state, extra_state)
     end
   end
 end

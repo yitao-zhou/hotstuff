@@ -83,7 +83,6 @@ defmodule HotStuff.LogEntry do
   end
 end
 
-
 defmodule HotStuff.Msg do
   @moduledoc """
   Utility 1 function Msg
@@ -97,6 +96,7 @@ defmodule HotStuff.Msg do
     node: nil,
     justify: nil
   )
+
   @doc """
   Create a new Msg
   """
@@ -130,7 +130,8 @@ defmodule HotStuff.VoteMsg do
 
   # @enforce_keys []
   defstruct(message: nil, partialSig: nil)
-  @spec new(%HotStuff.Msg{}, any()) ::%VoteMsg{
+
+  @spec new(%HotStuff.Msg{}, any()) :: %VoteMsg{
           message: %HotStuff.Msg{},
           partialSig: any()
         }
@@ -150,9 +151,13 @@ defmodule HotStuff.QC do
 
   # @enforce_keys []
   defstruct(
-    type: nil, view_number: nil, node: nil, sig: nil
+    type: nil,
+    view_number: nil,
+    node: nil,
+    sig: nil
   )
-  @spec new(atom(), non_neg_integer(), %HotStuff.LogEntry{}, any()) ::%QC{
+
+  @spec new(atom(), non_neg_integer(), %HotStuff.LogEntry{}, any()) :: %QC{
           type: atom(),
           view_number: non_neg_integer(),
           node: %HotStuff.LogEntry{},
