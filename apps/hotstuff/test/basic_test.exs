@@ -15,14 +15,14 @@ defmodule BasicTest do
       HotStuff.new_configuration([:a, :b, :c, :d], :a)
   
       spawn(:a, fn -> HotStuff.become_leader(base_config) end)
-    #   spawn(:b, fn -> PBFT.become_backup(base_config) end)
-    #   spawn(:c, fn -> PBFT.become_backup(base_config) end)
-    #   spawn(:d, fn -> PBFT.become_backup(base_config) end)
+      spawn(:b, fn -> HotStuff.become_replica(base_config) end)
+      spawn(:c, fn -> HotStuff.become_replica(base_config) end)
+      spawn(:d, fn -> HotStuff.become_replica(base_config) end)
   
       client =
         spawn(:client, fn ->
-          client = HotStuff.Client.new_client(:a)
-          HotStuff.Client.nop(client)
+          client = HotStuff.Client.new_client([:a, :b, :c, :d], :a)
+          HotStuff.Client.client_request(client)
   
           receive do
           after

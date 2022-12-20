@@ -181,7 +181,8 @@ defmodule HotStuff do
   """
   @spec safeNode(%HotStuff{}, any(), any()) :: boolean()
   def safeNode(state, node, qc) do
-    raise "Not Yet Implemented"
+    #TODO: consider how to implement the safe node here
+    true
   end
 
   @spec get_majority(%HotStuff{}, any()) :: boolean()
@@ -225,6 +226,7 @@ defmodule HotStuff do
          justify: qc
        }} ->
         # Tracking :new_view message received from followers and put them into the collector
+        Logger.info("#{type}, #{view_number}, #{extra_state.type}, #{state.curr_view - 1}")
         if matching_msg(type, view_number, extra_state.type, state.curr_view - 1) do
           extra_state = %{extra_state | collector: qc ++ extra_state.collector}
           # Wait for (n-f-1) = 2f :new_view message from the followers
@@ -348,12 +350,12 @@ defmodule HotStuff do
           justify: high_qc
         }}} ->
         if sender == state.current_leader &&
-             matching_msg(type, view_number, extra_state.type, state.curr_view) do
+            matching_msg(type, view_number, extra_state.type, state.curr_view) do
               if node_proposal.parent == :crypto.hash(:sha256, high_qc.node) &&
-               safeNode(state, node_proposal, high_qc) do
-            vote_msg = generate_votemsg(state, type, node_proposal, nil)
-            send(state.current_leader, vote_msg)
-          end
+                safeNode(state, node_proposal, high_qc) do
+                  vote_msg = generate_votemsg(state, type, node_proposal, nil)
+                  send(state.current_leader, vote_msg)
+              end
         end
 
         replica(state, %{extra_state | type: :precommit})
@@ -412,8 +414,15 @@ defmodule HotStuff do
         if (get_current_leader(state) == whoami()) do
           become_leader(state)
         else
+          send(whoami(), :nextViewInterrupt)
           replica(state, %{extra_state | type: :prepare})
         end
+      
+      {sender,:nextViewInterrupt} -> 
+        # send a new view message to new leader
+        newview_msg = generate_msg(state, :new_view, nil, nil)
+        send(get_current_leader(state), newview_msg)
+        replica(state,extra_state)
 
       # Messages from external clients. Redirect the client to leader of the view
       {sender, :nop} ->
@@ -445,15 +454,32 @@ defmodule HotStuff.Client do
   requests to the RSM.
   """
   alias __MODULE__
-  @enforce_keys [:leaderID]
-  defstruct(leaderID: nil)
+  @enforce_keys [:replica_table, :current_leader]
+  defstruct(replica_table: nil, current_leader: nil)
 
   @doc """
-  Construct a new PBFT Client.
+  Construct a new Hotstuff Client.
   """
-  @spec new_client(atom()) :: %Client{leaderID: atom()}
-  def new_client(member) do
-    %Client{leaderID: member}
+  @spec new_client([],atom()) :: %Client{replica_table: [], current_leader: atom()}
+  def new_client(replicas, member) do
+    %Client{replica_table: replicas, current_leader: member}
+  end
+
+  @doc """
+  Send a nop request to the RSM.
+  """
+  @spec client_request(%Client{}) :: {:ok, %Client{}}
+  def client_request(client) do
+    for replica <- client.replica_table, do:
+      send(replica, :nextViewInterrupt)
+
+    receive do
+      # {_, {:redirect, new_leader}} ->
+      #   nop(%{client | leader: new_leader})
+
+      {_, :ok} ->
+        {:ok, client}
+    end
   end
 
   @doc """
@@ -461,7 +487,7 @@ defmodule HotStuff.Client do
   """
   @spec nop(%Client{}) :: {:ok, %Client{}}
   def nop(client) do
-    leader = client.leaderID
+    leader = client.current_leader
     send(leader, :nop)
 
     receive do
