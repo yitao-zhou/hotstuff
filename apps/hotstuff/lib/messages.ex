@@ -83,6 +83,36 @@ defmodule HotStuff.LogEntry do
   end
 end
 
+defmodule HotStuff.QC do
+  @moduledoc """
+  quorum certificate
+  """
+  alias __MODULE__
+
+  # @enforce_keys []
+  defstruct(
+    type: nil,
+    view_number: nil,
+    node: nil,
+    sig: nil
+  )
+
+  @spec new(atom(), non_neg_integer(), %HotStuff.LogEntry{}, any()) :: %QC{
+          type: atom(),
+          view_number: non_neg_integer(),
+          node: %HotStuff.LogEntry{},
+          sig: any()
+        }
+  def new(type, view_number, node, sig) do
+    %QC{
+      type: type,
+      view_number: view_number,
+      node: node,
+      sig: sig
+    }
+  end
+end
+
 defmodule HotStuff.Msg do
   @moduledoc """
   Utility 1 function Msg
@@ -143,32 +173,4 @@ defmodule HotStuff.VoteMsg do
   end
 end
 
-defmodule HotStuff.QC do
-  @moduledoc """
-  quorum certificate
-  """
-  alias __MODULE__
 
-  # @enforce_keys []
-  defstruct(
-    type: nil,
-    view_number: nil,
-    node: nil,
-    sig: nil
-  )
-
-  @spec new(atom(), non_neg_integer(), %HotStuff.LogEntry{}, any()) :: %QC{
-          type: atom(),
-          view_number: non_neg_integer(),
-          node: %HotStuff.LogEntry{},
-          sig: any()
-        }
-  def new(type, view_number, node, sig) do
-    %QC{
-      type: type,
-      view_number: view_number,
-      node: node,
-      sig: sig
-    }
-  end
-end

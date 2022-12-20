@@ -31,7 +31,8 @@ defmodule HotStuff do
     # The highest qc (index the replica voted commit)
     locked_qc: nil,
     node_to_propose: nil,
-
+    commit_height: nil,
+    last_applied_height: nil,
     # In this simulation the RSM we are building is a queue
     queue: nil
   )
@@ -97,7 +98,7 @@ defmodule HotStuff do
 
       %HotStuff.LogEntry{operation: :deq, requester: r} ->
         {ret, state} = dequeue(state)
-        {{r, ret}, sate}
+        {{r, ret}, state}
 
       %HotStuff.LogEntry{} ->
         raise "Log entry with an unknown operation: maybe an empty entry?"
@@ -142,9 +143,9 @@ defmodule HotStuff do
   This function is to create a leaf
   """
   @spec create_leaf(%HotStuff.QC{}, %HotStuff.LogEntry{}) :: %HotStuff.LogEntry{}
-  def createLeaf(high_qc, proposal_node) do
+  def create_leaf(high_qc, proposal_node) do
     # Hash the parent node and assign hash value to the new log entry
-    %{proposal_node | parent: crypto.hash(:sha256, high_qc.node)}
+    %{proposal_node | parent: :crypto.hash(:sha256, high_qc.node)}
   end
 
   @doc """
@@ -184,7 +185,7 @@ defmodule HotStuff do
   end
 
   @spec get_majority(%HotStuff{}, any()) :: boolean()
-  def getMajority(state, extra_state) do
+  def get_majority(state, extra_state) do
     length(extra_state.collector) > Integer.floor_div(length(state.replica_table), 3) * 2
   end
 
@@ -232,6 +233,8 @@ defmodule HotStuff do
               extra_state.collector
               |> Enum.max_by(fn x -> x.view_number end)
 
+            # TODO: define node_to_propose here
+            node_to_propose = HotStuff.LogEntry.empty()
             # Create the node to be proposed by extending from the high_qc node
             node_proposal = create_leaf(high_qc, node_to_propose)
             # create the prepare message and broadcast to all the follwers
@@ -249,7 +252,7 @@ defmodule HotStuff do
       {sender,
        %HotStuff.VoteMsg{
          message: message,
-         partial_sig: partial_sig
+         partialSig: partial_sig
        }} ->
         # For each phase, collect the partial sig received from follower
         if matching_msg(message.type, message.view_number, extra_state.type, state.curr_view) do
@@ -326,7 +329,7 @@ defmodule HotStuff do
     )
 
     state = %{state | is_leader: false, current_leader: get_current_leader(state)}
-    follower(state, %{type: :prepare})
+    replica(state, %{type: :prepare})
   end
 
   @doc """
@@ -346,7 +349,7 @@ defmodule HotStuff do
         }}} ->
         if sender == state.current_leader &&
              matching_msg(type, view_number, extra_state.type, state.curr_view) do
-          if node_proposal.parent == crypto.hash(:sha256, high_qc.node) &&
+              if node_proposal.parent == :crypto.hash(:sha256, high_qc.node) &&
                safeNode(state, node_proposal, high_qc) do
             vote_msg = generate_votemsg(state, type, node_proposal, nil)
             send(state.current_leader, vote_msg)
@@ -409,24 +412,24 @@ defmodule HotStuff do
         if (get_current_leader(state) == whoami()) do
           become_leader(state)
         else
-          replica(state, %{extra_state | type: prepare})
+          replica(state, %{extra_state | type: :prepare})
         end
 
       # Messages from external clients. Redirect the client to leader of the view
       {sender, :nop} ->
         Logger.info("Follower #{whoami} receive client nop request")
         send(sender, {:redirect, state.current_leader})
-        follower(state, extra_state)
+        replica(state, extra_state)
 
       {sender, {:enq, item}} ->
         Logger.info("Follower #{whoami} receive client enq request")
         send(sender, {:redirect, state.current_leader})
-        follower(state, extra_state)
+        replica(state, extra_state)
 
       {sender, :deq} ->
         Logger.info("Follower #{whoami} receive client enq request")
         send(sender, {:redirect, state.current_leader})
-        follower(state, extra_state)
+        replica(state, extra_state)
     end
   end
 end
