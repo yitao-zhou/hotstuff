@@ -20,10 +20,6 @@ defmodule HotStuff do
     current_leader: nil,
     is_leader: nil,
 
-    # Log is the highest tree branch kown to the replica, and we save the brach as a list
-    # with latter entries (lower node in the tree) closer to the head of the list
-    log: nil,
-
     # highest qc which a replica voted pre-commit
     prepared_qc: nil,
     precommit_qc: nil,
@@ -31,8 +27,6 @@ defmodule HotStuff do
     # The highest qc (index the replica voted commit)
     locked_qc: nil,
     node_to_propose: nil,
-    commit_height: nil,
-    last_applied_height: nil,
     # In this simulation the RSM we are building is a queue
     queue: nil
   )
@@ -44,7 +38,7 @@ defmodule HotStuff do
   """
   @spec new_configuration(
           [atom()],
-          non_neg_integer()
+          atom()
         ) :: %HotStuff{}
   def new_configuration(
         replica_table,
@@ -55,9 +49,11 @@ defmodule HotStuff do
       curr_view: 0,
       current_leader: leader,
       is_leader: false,
-      log: [],
-      commit_height: 0,
-      last_applied_height: 0,
+      prepared_qc: nil,
+      precommit_qc: nil,
+      commit_qc: nil,
+      locked_qc: nil,
+      node_to_propose: nil,
       queue: :queue.new()
     }
   end
@@ -235,10 +231,8 @@ defmodule HotStuff do
               extra_state.collector
               |> Enum.max_by(fn x -> x.view_number end)
 
-            # TODO: define node_to_propose here
-            node_to_propose = HotStuff.LogEntry.empty()
             # Create the node to be proposed by extending from the high_qc node
-            node_proposal = create_leaf(high_qc, node_to_propose)
+            node_proposal = create_leaf(high_qc, state.node_to_propose)
             # create the prepare message and broadcast to all the follwers
             prepare_msg = generate_msg(state, :prepare, node_proposal, high_qc)
             broadcast_to_others(state, {:prepare, prepare_msg})
@@ -417,8 +411,8 @@ defmodule HotStuff do
           send(whoami(), :nextViewInterrupt)
           replica(state, %{extra_state | type: :prepare})
         end
-      
-      {sender,:nextViewInterrupt} -> 
+
+      {sender,:nextViewInterrupt} ->
         # send a new view message to new leader
         newview_msg = generate_msg(state, :new_view, nil, nil)
         send(get_current_leader(state), newview_msg)
