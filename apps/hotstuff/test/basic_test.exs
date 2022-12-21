@@ -12,7 +12,7 @@ defmodule BasicTest do
 
 
       base_config =
-      HotStuff.new_configuration([:a, :b, :c, :d], :a)
+      HotStuff.new_configuration([:a, :b, :c, :d], :a, 2_000)
   
       spawn(:a, fn -> HotStuff.become_leader(base_config) end)
       spawn(:b, fn -> HotStuff.become_replica(base_config) end)
@@ -22,6 +22,9 @@ defmodule BasicTest do
       client =
         spawn(:client, fn ->
           client = HotStuff.Client.new_client([:a, :b, :c, :d], :a)
+          # I should enqueue some random tasks
+          HotStuff.Client.enq(client, 5)
+          :timer.sleep(500)
           HotStuff.Client.client_request(client)
   
           receive do

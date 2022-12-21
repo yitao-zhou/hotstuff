@@ -151,7 +151,13 @@ defmodule HotStuff do
   @spec create_leaf(%HotStuff.QC{}, %HotStuff.LogEntry{}) :: %HotStuff.LogEntry{}
   def create_leaf(high_qc, proposal_node) do
     # Hash the parent node and assign hash value to the new log entry
-    %{proposal_node | parent: :crypto.hash(:sha256, high_qc.node)}
+
+    if high_qc.node == nil do
+      # TODO: I suppose this should be for the initial situation, I don't know if we need to change this
+      %{proposal_node | parent: :crypto.hash(:sha256, to_string(high_qc.node))}
+    else
+      %{proposal_node | parent: :crypto.hash(:sha256, to_string(high_qc.node))}
+    end
   end
 
   @doc """
@@ -193,6 +199,8 @@ defmodule HotStuff do
 
   @spec get_majority(%HotStuff{}, any()) :: boolean()
   def get_majority(state, extra_state) do
+    IO.puts("#{length(extra_state.collector)}, #{Integer.floor_div(length(state.replica_table), 3) * 2}")
+    
     length(extra_state.collector) > Integer.floor_div(length(state.replica_table), 3) * 2
   end
 
@@ -208,7 +216,7 @@ defmodule HotStuff do
   @doc """
   Reset the view_change_timer on the process
   """
-  @spec reset_view_change_timer(%HotStuff{} :: %HotStuff{})
+  @spec reset_view_change_timer(%HotStuff{}) :: %HotStuff{}
   defp reset_view_change_timer(state) do
     if state.view_change_timer != nil do
       Emulation.cancel_timer(state.view_change_timer)
@@ -255,22 +263,34 @@ defmodule HotStuff do
         # Tracking :new_view message received from followers and put them into the collector
         Logger.info("#{type}, #{view_number}, #{extra_state.type}, #{state.curr_view - 1}")
 
-        if matching_msg(type, view_number, extra_state.type, state.curr_view - 1) do
-          extra_state = %{extra_state | collector: qc ++ extra_state.collector}
+        if matching_msg(type, view_number, extra_state.type, state.curr_view - 1) or state.curr_view == 0 do
+          extra_state = %{extra_state | collector: [qc] ++ extra_state.collector}
+          IO.inspect(extra_state)
           # Wait for (n-f-1) = 2f :new_view message from the followers
           if get_majority(state, extra_state) do
             high_qc =
-              extra_state.collector
-              |> Enum.max_by(fn x -> x.view_number end)
+              if Enum.member?(extra_state.collector, nil) do
+                # TODO: what to define when any of the collector info is nil?
+                HotStuff.QC.new(type, view_number, log_entry, 1) # use 1 to temperarily represent sig
+              else
+                extra_state.collector
+                  |> Enum.max_by(fn x -> x.view_number end)
+              end
 
             # Create the node to be proposed by extending from the high_qc node
+            IO.puts("high_qc is #{inspect(high_qc)}, node to propose is #{inspect(state.node_to_propose)}")
             node_proposal = create_leaf(high_qc, state.node_to_propose)
             # create the prepare message and broadcast to all the follwers
             prepare_msg = generate_msg(state, :prepare, node_proposal, high_qc)
+            Logger.info("In view #{state.curr_view}, the client has broadcasted prepare msg to replicas")
             broadcast_to_others(state, {:prepare, prepare_msg})
             # The leader enters the prepare phase after the broadcast
             extra_state = %{extra_state | type: :prepare, collector: []}
             state = reset_view_change_timer(state)
+            leader(state, extra_state)
+          else
+            Logger.info("Leader #{whoami()} don't get majority vote for #{type}")
+            leader(state, extra_state)
           end
         else
           Logger.info("leader #{inspect(whoami())} receive unexpected message")
@@ -285,7 +305,7 @@ defmodule HotStuff do
        }} ->
         # For each phase, collect the partial sig received from follower
         if matching_msg(message.type, message.view_number, extra_state.type, state.curr_view) do
-          extra_state = %{extra_state | collector: partial_sig ++ extra_state.collector}
+          extra_state = %{extra_state | collector: [partial_sig] ++ extra_state.collector}
           # Wait for (n-f) votes
           if get_majority(state, extra_state) do
             # combine the partial signature through threshold signature
@@ -315,7 +335,10 @@ defmodule HotStuff do
             else
               extra_state = %{extra_state | collector: []}
               state = reset_view_change_timer(state)
+              leader(state, extra_state)
             end
+          else
+            leader(state, extra_state)
           end
         end
 
@@ -391,9 +414,10 @@ defmodule HotStuff do
           node: node_proposal,
           justify: high_qc
         }}} ->
+        Logger.info("#{whoami()} get to the prepare phase in view #{state.curr_view}")
         if sender == state.current_leader &&
              matching_msg(type, view_number, extra_state.type, state.curr_view) do
-          if node_proposal.parent == :crypto.hash(:sha256, high_qc.node) &&
+          if node_proposal.parent == :crypto.hash(:sha256, to_string(high_qc.node)) &&
                safeNode(state, node_proposal, high_qc) do
             vote_msg = generate_votemsg(state, type, node_proposal, nil)
             send(state.current_leader, vote_msg)
@@ -412,6 +436,7 @@ defmodule HotStuff do
           node: node,
           justify: prepared_qc
         }}} ->
+        Logger.info("#{whoami()} get to the precommit phase in view #{state.curr_view}")
         if sender == state.current_leader &&
              matching_qc(prepared_qc, extra_state.type, state.curr_view) do
           %{state | prepared_qc: prepared_qc}
@@ -431,6 +456,7 @@ defmodule HotStuff do
           node: node,
           justify: precommit_qc
         }}} ->
+        Logger.info("#{whoami()} get to the commit phase in view #{state.curr_view}")
         if sender == state.current_leader &&
              matching_qc(precommit_qc, extra_state.type, state.curr_view) do
           %{state | locked_qc: precommit_qc}
@@ -450,11 +476,13 @@ defmodule HotStuff do
           node: node,
           justify: commit_qc
         }}} ->
+        Logger.info("#{whoami()} get to the decide phase in view #{state.curr_view}")
         if sender == state.current_leader &&
              matching_qc(commit_qc, extra_state.type, state.curr_view) do
           # Execute the commited logEntry and response to the client
           entry = commit_qc.node
           {{requester, return_value}, new_state} = commit_log_entry(state, entry)
+          Logger.info("Send the return value #{return_value} to requester #{requester}")
           send(requester, return_value)
         end
 
@@ -462,16 +490,19 @@ defmodule HotStuff do
         state = %{state | curr_view: state.curr_view + 1}
 
         if get_current_leader(state) == whoami() do
+
+          Logger.info("#{whoami()} become leader in view #{state.curr_view}")
           become_leader(state)
         else
           replica(state, extra_state)
         end
 
-      # {sender, :nextViewInterrupt} ->
-      #   # send a new view message to new leader
-      #   newview_msg = generate_msg(state, :new_view, nil, state.prepared_qc)
-      #   send(get_current_leader(state), newview_msg)
-      #   replica(state, %{extra_state | type: :prepare})
+
+      {sender, :nextViewInterrupt} ->
+        # send a new view message to new leader
+        newview_msg = generate_msg(state, :new_view, nil, state.prepared_qc)
+        send(get_current_leader(state), newview_msg)
+        replica(state, %{extra_state | type: :prepare})
 
       # Messages from external clients. Redirect the client to leader of the view
       {sender, :nop} ->
@@ -544,6 +575,23 @@ defmodule HotStuff.Client do
 
       {_, :ok} ->
         {:ok, client}
+    end
+  end
+
+  @doc """
+  Send an enqueue request to the RSM.
+  """
+  @spec enq(%Client{}, any()) :: {:ok, %Client{}}
+  def enq(client, item) do
+    leader = client.current_leader
+    send(leader, {:enq, item})
+
+    receive do
+      {_, :ok} ->
+        {:ok, client}
+
+      {_, {:redirect, new_leader}} ->
+        enq(%{client | leader: new_leader}, item)
     end
   end
 end
