@@ -16,7 +16,6 @@ defmodule HotStuff do
   defstruct(
     # The list of current processes
     replica_table: nil,
-
     curr_view: nil,
     current_leader: nil,
     is_leader: nil,
@@ -28,14 +27,14 @@ defmodule HotStuff do
     # The highest qc (index the replica voted commit)
     locked_qc: nil,
 
-    #In this simulation we assume leader will only propose one command at a time
+    # In this simulation we assume leader will only propose one command at a time
     node_to_propose: nil,
     # In this simulation the RSM we are building is a queue
     queue: nil,
 
-    #timer will be trigger if leader did not receive enough message from followers
-    #Or follower hasn't heard from leader
-    view_change_timeout: nil
+    # timer will be trigger if leader did not receive enough message from followers
+    # Or follower hasn't heard from leader
+    view_change_timeout: nil,
     view_change_timer: nil
   )
 
@@ -211,10 +210,11 @@ defmodule HotStuff do
   """
   @spec reset_view_change_timer(%HotStuff{} :: %HotStuff{})
   defp reset_view_change_timer(state) do
-    if (state.view_change_timer) != nil do
+    if state.view_change_timer != nil do
       Emulation.cancel_timer(state.view_change_timer)
     end
-    %{state | view_change_timer = Emulation.timer(state.view_change_timeout, :view_change)}
+
+    %{state | view_change_timer: Emulation.timer(state.view_change_timeout, :view_change)}
   end
 
   @doc """
@@ -223,9 +223,13 @@ defmodule HotStuff do
   @spec become_leader(%HotStuff{}) :: no_return()
   def become_leader(state) do
     Logger.info("Process #{inspect(whoami())} become leader in view #{inspect(state.curr_view)}")
-    state = state |> reset_view_change_timer()
-                  |> Map.put(:is_leader, true)
-                  |> Map.put(:current_leader, whoami())
+
+    state =
+      state
+      |> reset_view_change_timer()
+      |> Map.put(:is_leader, true)
+      |> Map.put(:current_leader, whoami())
+
     leader(state, %{type: :new_view, collector: [state.prepared_qc]})
   end
 
@@ -331,6 +335,7 @@ defmodule HotStuff do
           state
           | node_to_propose: HotStuff.LogEntry.enqueue(state.curr_view, sender, item, nil)
         }
+
         reset_view_change_timer(state)
         leader(state, extra_state)
 
@@ -354,9 +359,15 @@ defmodule HotStuff do
     Logger.info(
       "Process #{inspect(whoami())} become follower in view #{inspect(state.curr_view)}"
     )
-    state = state |> reset_view_change_timer()
-                  |> Map.put(:is_leader, false)
-                  |> Map.put(:current_leader, get_current_leader(state))
+
+    state =
+      state
+      |> reset_view_change_timer()
+      |> Map.put(:is_leader, false)
+      |> Map.put(:current_leader, get_current_leader(state))
+
+    newview_msg = generate_msg(state, :new_view, nil, state.prepared_qc)
+    send(get_current_leader(state), newview_msg)
     replica(state, %{type: :prepare})
   end
 
@@ -367,7 +378,9 @@ defmodule HotStuff do
   def replica(state, extra_state) do
     receive do
       :view_change ->
-        send(whoami(), :nextViewInterrupt)
+        newview_msg = generate_msg(state, :new_view, nil, state.prepared_qc)
+        send(get_current_leader(state), newview_msg)
+        replica(state, %{extra_state | type: :prepare})
 
       # Message received from leader
       {sender,
@@ -451,14 +464,14 @@ defmodule HotStuff do
         if get_current_leader(state) == whoami() do
           become_leader(state)
         else
-          send(whoami(), :nextViewInterrupt)
+          replica(state, extra_state)
         end
 
-      {sender, :nextViewInterrupt} ->
-        # send a new view message to new leader
-        newview_msg = generate_msg(state, :new_view, nil, state.prepared_qc)
-        send(get_current_leader(state), newview_msg)
-        replica(state, %{extra_state | type: :prepare})
+      # {sender, :nextViewInterrupt} ->
+      #   # send a new view message to new leader
+      #   newview_msg = generate_msg(state, :new_view, nil, state.prepared_qc)
+      #   send(get_current_leader(state), newview_msg)
+      #   replica(state, %{extra_state | type: :prepare})
 
       # Messages from external clients. Redirect the client to leader of the view
       {sender, :nop} ->
