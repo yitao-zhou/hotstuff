@@ -133,14 +133,14 @@ defmodule HotStuff.Msg do
   @spec new(
           any(),
           non_neg_integer(),
-          %HotStuff.LogEntry{},
-          %HotStuff.QC{}
+          any(),
+          any()
         ) ::
           %Msg{
             type: any(),
             view_number: non_neg_integer(),
-            node: %HotStuff.LogEntry{},
-            justify: %HotStuff.QC{}
+            node: any(),
+            justify: any()
           }
   def new(type, view_number, node, justify) do
     %Msg{
@@ -172,5 +172,3 @@ defmodule HotStuff.VoteMsg do
     }
   end
 end
-
-
