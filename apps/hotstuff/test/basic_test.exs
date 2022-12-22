@@ -45,7 +45,7 @@ defmodule BasicTest do
     Emulation.init()
     Emulation.append_fuzzers([Fuzzers.delay(2)])
 
-    base_config = HotStuff.new_configuration([:a, :b, :c, :d], :a, 20_000)
+    base_config = HotStuff.new_configuration([:a, :b, :c, :d], :a, 4_000)
 
     spawn(:a, fn -> HotStuff.become_leader(base_config) end)
     spawn(:b, fn -> HotStuff.become_replica(base_config) end)
