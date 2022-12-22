@@ -105,7 +105,7 @@ defmodule HotStuff do
 
       %HotStuff.LogEntry{operation: :deq, requester: r} ->
         {ret, state} = dequeue(state)
-        {{r, ret}, state}
+        {{r, {:value, ret}}, state}
 
       %HotStuff.LogEntry{} ->
         raise "Log entry with an unknown operation: maybe an empty entry?"
@@ -229,7 +229,9 @@ defmodule HotStuff do
   """
   @spec become_leader(%HotStuff{}) :: no_return()
   def become_leader(state) do
-    Logger.info("Process #{inspect(whoami())} become leader in view #{inspect(state.curr_view)}")
+    Logger.info(
+      "Process #{inspect(whoami())} become leader in view #{inspect(state.curr_view)}, with state #{inspect(state)}"
+    )
 
     state =
       state
@@ -261,10 +263,10 @@ defmodule HotStuff do
        }} ->
         # Tracking :new_view message received from followers and put them into the collector
         Logger.info(
-          "Leader received: #{type}, #{view_number}, #{extra_state.type}, #{state.curr_view - 1}"
+          "Leader received new view message: #{sender}, #{type}, #{view_number}, #{extra_state.type}, #{state.curr_view}"
         )
 
-        if matching_msg(type, view_number, extra_state.type, state.curr_view - 1) do
+        if matching_msg(type, view_number, extra_state.type, state.curr_view) do
           extra_state = %{extra_state | collector: [qc] ++ extra_state.collector}
           Logger.info("leader extra_state: #{inspect(extra_state)}")
           # Wait for (n-f-1) = 2f :new_view message from the followers
@@ -296,15 +298,13 @@ defmodule HotStuff do
             )
 
             # The leader enters the prepare phase after the broadcast
-            extra_state = %{extra_state | type: :prepare, collector: []}
+            extra_state = %{extra_state | type: :prepare, collector: [1]}
             state = reset_view_change_timer(state)
             Logger.info("Leader go into state: #{inspect(extra_state)}")
             leader(state, extra_state)
           else
             leader(state, extra_state)
           end
-        else
-          Logger.info("leader #{inspect(whoami())} receive unexpected message")
         end
 
         leader(state, extra_state)
@@ -333,7 +333,7 @@ defmodule HotStuff do
             Logger.info("Leader broadcast msg: #{inspect(msg)}")
 
             # Leader go into the next phase
-            extra_state = %{extra_state | type: :precommit, collector: []}
+            extra_state = %{extra_state | type: :precommit, collector: [1]}
             state = reset_view_change_timer(state)
             leader(state, extra_state)
           end
@@ -366,7 +366,7 @@ defmodule HotStuff do
             Logger.info("Leader broadcast msg: #{inspect(msg)}")
 
             # Leader go into the next phase
-            extra_state = %{extra_state | type: :commit, collector: []}
+            extra_state = %{extra_state | type: :commit, collector: [1]}
             state = reset_view_change_timer(state)
             leader(state, extra_state)
           end
@@ -396,11 +396,10 @@ defmodule HotStuff do
             msg = generate_msg(state.curr_view, :decide, nil, qc)
             broadcast_to_others(state, {:decide, msg})
             Logger.info("Leader broadcast msg: #{inspect(msg)}")
-
-            # Leader go into the next phase
-            extra_state = %{extra_state | type: :decide, collector: []}
-            state = %{state | curr_view: state.curr_view + 1}
             become_replica(state)
+            # # Leader go into the next phase
+            # extra_state = %{extra_state | type: :decide, collector: [1]}
+            # state = reset_view_change_timer(state)
           end
 
           leader(state, extra_state)
@@ -434,6 +433,7 @@ defmodule HotStuff do
           | node_to_propose: HotStuff.LogEntry.dequeue(state.curr_view, sender, nil)
         }
 
+        state = reset_view_change_timer(state)
         leader(state, extra_state)
     end
   end
@@ -444,7 +444,7 @@ defmodule HotStuff do
   @spec become_replica(%HotStuff{is_leader: false}) :: no_return()
   def become_replica(state) do
     Logger.info(
-      "Process #{inspect(whoami())} become follower in view #{inspect(state.curr_view)}"
+      "Process #{inspect(whoami())} become follower in view #{inspect(state.curr_view)}, with state #{inspect(state)}"
     )
 
     state =
@@ -456,7 +456,7 @@ defmodule HotStuff do
     # Generate a special new view message for view 0
     newview_msg =
       if state.curr_view == 0 do
-        generate_msg(-1, :new_view, HotStuff.LogEntry.empty(), nil)
+        generate_msg(state.curr_view, :new_view, HotStuff.LogEntry.empty(), nil)
       else
         generate_msg(state.curr_view, :new_view, nil, state.prepared_qc)
       end
@@ -472,10 +472,15 @@ defmodule HotStuff do
   @spec replica(%HotStuff{is_leader: false}, any()) :: no_return()
   def replica(state, extra_state) do
     receive do
+      # Timer out triggered for replica waiting message from leader
       :view_change ->
-        newview_msg = generate_msg(state.curr_view, :new_view, nil, state.prepared_qc)
-        send(get_current_leader(state), newview_msg)
-        replica(state, %{extra_state | type: :prepare})
+        state = %{state | curr_view: state.curr_view + 1}
+
+        if get_current_leader(state) == whoami() do
+          become_leader(state)
+        else
+          become_replica(state)
+        end
 
       # Message received from leader
       {sender,
@@ -492,6 +497,8 @@ defmodule HotStuff do
 
         if sender == state.current_leader &&
              matching_msg(type, view_number, :prepare, state.curr_view) do
+          Logger.info("validate the proposal")
+
           if node_proposal.parent == :erlang.phash2(high_qc.node) &&
                safeNode(state, node_proposal, high_qc) do
             vote_msg = generate_votemsg(state, type, node_proposal, nil)
@@ -518,7 +525,7 @@ defmodule HotStuff do
 
         if sender == state.current_leader &&
              matching_qc(prepared_qc, :prepare, state.curr_view) do
-          %{state | prepared_qc: prepared_qc}
+          state = %{state | prepared_qc: prepared_qc}
           vote_msg = generate_votemsg(state, type, prepared_qc.node, nil)
           send(state.current_leader, {type, vote_msg})
           Logger.info("Follower send vote: #{inspect(vote_msg)}")
@@ -542,7 +549,7 @@ defmodule HotStuff do
 
         if sender == state.current_leader &&
              matching_qc(precommit_qc, :precommit, state.curr_view) do
-          %{state | locked_qc: precommit_qc}
+          state = %{state | locked_qc: precommit_qc}
           vote_msg = generate_votemsg(state, type, precommit_qc.node, nil)
           send(state.current_leader, {type, vote_msg})
           Logger.info("Follower send vote: #{inspect(vote_msg)}")
@@ -568,41 +575,49 @@ defmodule HotStuff do
              matching_qc(commit_qc, :commit, state.curr_view) do
           # Execute the commited logEntry and response to the client
           entry = commit_qc.node
-          {{requester, return_value}, new_state} = commit_log_entry(state, entry)
-          Logger.info("Send the return value #{return_value} to requester #{requester}")
+          {{requester, return_value}, state} = commit_log_entry(state, entry)
+          Logger.info("Send the return value #{inspect(return_value)} to requester #{requester}")
           send(requester, return_value)
+
+          state =
+            state
+            |> reset_view_change_timer()
+            |> Map.put(:curr_view, state.curr_view + 1)
+
+          if get_current_leader(state) == whoami() do
+            become_leader(state)
+          else
+            become_replica(state)
+          end
         end
-
-        # Increment the view number and check if it will turn into leader in the next view
-        state = %{state | curr_view: state.curr_view + 1}
-
-        if get_current_leader(state) == whoami() do
-          Logger.info("#{whoami()} become leader in view #{state.curr_view}")
-          become_leader(state)
-        else
-          replica(state, extra_state)
-        end
-
-      {sender, :nextViewInterrupt} ->
-        # send a new view message to new leader
-        newview_msg = generate_msg(state.curr_view, :new_view, nil, state.prepared_qc)
-        send(get_current_leader(state), newview_msg)
-        replica(state, %{extra_state | type: :prepare})
 
       # Messages from external clients. Redirect the client to leader of the view
       {sender, :nop} ->
         Logger.info("Follower #{whoami} receive client nop request")
-        send(sender, {:redirect, state.current_leader})
+        state = %{state | node_to_propose: HotStuff.LogEntry.nop(state.curr_view, sender, nil)}
+        reset_view_change_timer(state)
         replica(state, extra_state)
 
       {sender, {:enq, item}} ->
         Logger.info("Follower #{whoami} receive client enq request")
-        send(sender, {:redirect, state.current_leader})
+
+        state = %{
+          state
+          | node_to_propose: HotStuff.LogEntry.enqueue(state.curr_view, sender, item, nil)
+        }
+
+        reset_view_change_timer(state)
         replica(state, extra_state)
 
       {sender, :deq} ->
-        Logger.info("Follower #{whoami} receive client enq request")
-        send(sender, {:redirect, state.current_leader})
+        Logger.info("Follower #{whoami} receive client deq request")
+
+        state = %{
+          state
+          | node_to_propose: HotStuff.LogEntry.dequeue(state.curr_view, sender, nil)
+        }
+
+        reset_view_change_timer(state)
         replica(state, extra_state)
     end
   end
@@ -614,35 +629,42 @@ defmodule HotStuff.Client do
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
 
+  require Logger
+
   @moduledoc """
   A client that can be used to connect and send
   requests to the RSM.
   """
   alias __MODULE__
-  @enforce_keys [:replica_table, :current_leader]
-  defstruct(replica_table: nil, current_leader: nil)
+  @enforce_keys [:replica_table]
+  defstruct(replica_table: nil)
+
+  @spec broadcast_to_replicas(%Client{}, any()) :: [boolean()]
+  defp broadcast_to_replicas(replicas, message) do
+    replicas
+    |> Enum.map(fn pid -> send(pid, message) end)
+  end
 
   @doc """
   Construct a new Hotstuff Client.
   """
-  @spec new_client([], atom()) :: %Client{replica_table: [], current_leader: atom()}
-  def new_client(replicas, member) do
-    %Client{replica_table: replicas, current_leader: member}
+  @spec new_client([]) :: %Client{replica_table: []}
+  def new_client(replicas) do
+    %Client{replica_table: replicas}
   end
 
   @doc """
-  Send a nop request to the RSM.
+  Send a deq request to the RSM.
   """
-  @spec client_request(%Client{}) :: {:ok, %Client{}}
-  def client_request(client) do
-    for replica <- client.replica_table, do: send(replica, :nextViewInterrupt)
+  @spec deq(%Client{}) :: {:ok, %Client{}}
+  def deq(client) do
+    Logger.info("client sent deq command")
+    broadcast_to_replicas(client.replica_table, :deq)
 
     receive do
-      # {_, {:redirect, new_leader}} ->
-      #   nop(%{client | leader: new_leader})
-
-      {_, :ok} ->
-        {:ok, client}
+      {_, {:value, val}} ->
+        Logger.info("receive #{inspect(val)}")
+        {val, client}
     end
   end
 
@@ -651,13 +673,9 @@ defmodule HotStuff.Client do
   """
   @spec nop(%Client{}) :: {:ok, %Client{}}
   def nop(client) do
-    leader = client.current_leader
-    send(leader, :nop)
+    broadcast_to_replicas(client.replica_table, :nop)
 
     receive do
-      # {_, {:redirect, new_leader}} ->
-      #   nop(%{client | leader: new_leader})
-
       {_, :ok} ->
         {:ok, client}
     end
@@ -668,15 +686,12 @@ defmodule HotStuff.Client do
   """
   @spec enq(%Client{}, any()) :: {:ok, %Client{}}
   def enq(client, item) do
-    leader = client.current_leader
-    send(leader, {:enq, item})
+    broadcast_to_replicas(client.replica_table, {:enq, item})
 
     receive do
       {_, :ok} ->
+        Logger.info("client receive the ok for enq")
         {:ok, client}
-
-      {_, {:redirect, new_leader}} ->
-        enq(%{client | leader: new_leader}, item)
     end
   end
 end
