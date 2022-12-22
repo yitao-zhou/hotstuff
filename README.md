@@ -6,6 +6,7 @@
 - Yueyan Lu (yl6211@nyu.edu)
 
 The main implementation is under: `\apps\hotstuff\lib`
+
 Test case is under: `\apps\hotstuff\test`
 
 
